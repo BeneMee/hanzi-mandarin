@@ -1,9 +1,9 @@
-/* Prototyp-Logik: SRS, Lessons, Reviews, Einstellungen.
- * Vanilla JS, Persistenz via localStorage. */
+/* Prototype logic: SRS, lessons, reviews, settings.
+ * Vanilla JS, persistence via localStorage. */
 (function () {
   "use strict";
 
-  // ---------------------------------------------------------------- Daten
+  // ---------------------------------------------------------------- Data
   const D = window.DATA;
   const ALL = [
     ...D.components.map(x => ({ ...x, type: "component" })),
@@ -13,14 +13,15 @@
   const byId = Object.fromEntries(ALL.map(i => [i.id, i]));
   const displayGlyph = i => i.glyph || i.character || i.word;
 
-  // ---------------------------------------------------------------- SRS-Modell
-  // Stufen 1..9. Intervall = Zeit bis zum nächsten Review AUF dieser Stufe.
+  // ---------------------------------------------------------------- SRS model
+  // Stages 1..9. Interval = time until the next review WHILE at that stage.
   const STAGE_NAME = { 1:"Appr. I",2:"Appr. II",3:"Appr. III",4:"Appr. IV",5:"Guru I",6:"Guru II",7:"Master",8:"Enlightened",9:"Burned" };
   const GURU = 5;
   const HOUR = 3600e3, DAY = 24*HOUR;
   const REAL = { 1:4*HOUR, 2:8*HOUR, 3:23*HOUR, 4:47*HOUR, 5:7*DAY, 6:14*DAY, 7:30*DAY, 8:120*DAY };
   const DEMO = { 1:5e3, 2:10e3, 3:15e3, 4:20e3, 5:30e3, 6:45e3, 7:60e3, 8:90e3 };
-  const LESSON_BATCH = 8;   // wie viele neue Items pro Lesson-Runde
+  const LESSON_BATCH = 5;   // new items per lesson round
+  const REVIEW_BATCH = 5;   // items per review session
   const intervalFor = stage => (state.settings.demo ? DEMO : REAL)[stage] || 0;
 
   // ---------------------------------------------------------------- State
@@ -31,8 +32,8 @@
       display: "both",          // pinyin | zhuyin | both
       input: "pinyin_marks",    // pinyin_marks | pinyin_numbers | zhuyin
       toneStrict: true,
-      gating: true,             // WaniKani-Freischaltung: erst Guru -> dann nächste Items
-      demo: true                // kurze Intervalle zum Ausprobieren
+      gating: true,             // WaniKani-style unlocking: Guru first -> then next items
+      demo: true                // short intervals for trying it out
     }
   });
   let state = load();
@@ -66,7 +67,7 @@
     return item.type === "component" ? ["meaning"] : ["meaning", "reading"];
   }
 
-  // ---------------------------------------------------------------- Antwort-Prüfung
+  // ---------------------------------------------------------------- Answer checking
   const DIA = { "ā":"a","á":"a","ǎ":"a","à":"a","ē":"e","é":"e","ě":"e","è":"e",
     "ī":"i","í":"i","ǐ":"i","ì":"i","ō":"o","ó":"o","ǒ":"o","ò":"o",
     "ū":"u","ú":"u","ǔ":"u","ù":"u","ǖ":"ü","ǘ":"ü","ǚ":"ü","ǜ":"ü","ü":"u" };
@@ -79,13 +80,13 @@
     const i = noSpace(norm(input));
     if (!i) return "bad";
     const forms = [reading.pinyinNum, reading.pinyinMark, reading.zhuyin].map(f => noSpace(norm(f)));
-    if (forms.includes(i)) return "ok";                       // exakt (Ton korrekt)
-    if (!state.settings.toneStrict) {                         // Ton ignorieren -> "fast"
+    if (forms.includes(i)) return "ok";                       // exact (tone correct)
+    if (!state.settings.toneStrict) {                         // ignore tone -> "almost" counts as ok
       const iBase = stripPinyinTones(i).replace(ZHTONE, "");
       const ok = [reading.pinyinNum, reading.pinyinMark].some(f => stripPinyinTones(noSpace(norm(f))) === iBase)
               || noSpace(norm(reading.zhuyin)).replace(ZHTONE, "") === iBase;
       if (ok) return "ok";
-    } else {                                                  // streng -> Silbe ok, Ton falsch = "almost"
+    } else {                                                  // strict -> syllable ok, tone wrong = "almost"
       const iBase = stripPinyinTones(i).replace(ZHTONE, "");
       const almost = [reading.pinyinNum, reading.pinyinMark].some(f => stripPinyinTones(noSpace(norm(f))) === iBase)
                   || noSpace(norm(reading.zhuyin)).replace(ZHTONE, "") === iBase;
@@ -112,7 +113,7 @@
     return "bad";
   }
 
-  // ---------------------------------------------------------------- Aussprache anzeigen
+  // ---------------------------------------------------------------- Pronunciation display
   function readingDisplay(reading) {
     const d = state.settings.display;
     if (d === "pinyin") return reading.pinyinMark;
@@ -124,7 +125,7 @@
   const app = document.getElementById("app");
   const elLessons = document.getElementById("countLessons");
   const elReviews = document.getElementById("countReviews");
-  let session = null; // aktive Lern-/Review-Session
+  let session = null; // active lesson/review session
 
   function refreshCounts() {
     elLessons.textContent = availableLessons().length;
@@ -144,24 +145,24 @@
     app.innerHTML = `
       <div class="card">
         <h2>Level ${D.level}</h2>
-        <div class="muted" style="margin-bottom:8px">${gurued}/${D.hanzi.length} Hanzi auf Guru+ (${pct}%)</div>
+        <div class="muted" style="margin-bottom:8px">${gurued}/${D.hanzi.length} hanzi at Guru+ (${pct}%)</div>
         <div class="bar"><i style="width:${pct}%"></i></div>
       </div>
       <div class="card">
         <button class="bigbtn lessons" data-go="lessons" ${lessons ? "" : "disabled"}>
-          Lessons starten — ${lessons} verfügbar</button>
+          Start lessons — ${lessons} available</button>
         <button class="bigbtn reviews" data-go="reviews" ${reviews ? "" : "disabled"}>
-          Reviews starten — ${reviews} fällig</button>
+          Start reviews — ${reviews} due</button>
       </div>
       <div class="card">
         <div class="legend">
-          <span><i class="dot component"></i> Komponente</span>
+          <span><i class="dot component"></i> Radical</span>
           <span><i class="dot hanzi"></i> Hanzi</span>
-          <span><i class="dot vocab"></i> Vokabel</span>
+          <span><i class="dot vocab"></i> Vocabulary</span>
         </div>
-        ${grid(D.components.map(x=>({...x,type:"component"})), "Komponenten")}
+        ${grid(D.components.map(x=>({...x,type:"component"})), "Radicals")}
         ${grid(D.hanzi.map(x=>({...x,type:"hanzi"})), "Hanzi")}
-        ${grid(D.vocab.map(x=>({...x,type:"vocab"})), "Vokabeln")}
+        ${grid(D.vocab.map(x=>({...x,type:"vocab"})), "Vocabulary")}
       </div>`;
   }
 
@@ -202,13 +203,13 @@
         </div>
         <div class="studybody">${lessonBody(item)}</div>
         <div class="controls">
-          <button class="btn-ghost" id="prev" ${idx ? "" : "disabled"}>Zurück</button>
-          <button class="btn-primary" id="next">${idx === items.length - 1 ? "Fertig — jetzt abfragen" : "Weiter"}</button>
+          <button class="btn-ghost" id="prev" ${idx ? "" : "disabled"}>Back</button>
+          <button class="btn-primary" id="next">${idx === items.length - 1 ? "Done — quiz me" : "Next"}</button>
         </div>
       </div>`;
     document.getElementById("next").onclick = () => {
       if (idx === items.length - 1) {
-        startQuiz(items);     // direkt ins Pflicht-Quiz über genau diese Items
+        startQuiz(items);     // straight into the mandatory quiz over exactly these items
       } else { session.idx++; renderLesson(); }
     };
     const prev = document.getElementById("prev");
@@ -224,7 +225,7 @@
     if (item.type === "hanzi") {
       return `<h3>Meaning</h3><p class="answer">${item.meaning}</p>
         <h3>Reading</h3><p class="reading-line">${readingDisplay(item.reading)}</p>
-        <h3>Components</h3><div class="comp-row">${compChips(item.componentIds)}</div>
+        <h3>Radicals</h3><div class="comp-row">${compChips(item.componentIds)}</div>
         ${strokeBlock(item)}
         <h3>Meaning mnemonic</h3><p>${item.meaningMnemonic}</p>
         <h3>Reading mnemonic</h3><p>${item.readingMnemonic}</p>`;
@@ -244,7 +245,7 @@
     const ch = item.character || item.glyph;
     if (!ch || ch.length !== 1) return "";
     return `<div id="strokeArea" data-char="${ch}"></div>
-      <button class="linklike" id="animBtn">▶ Strichreihenfolge abspielen</button>`;
+      <button class="linklike" id="animBtn">▶ Play stroke order</button>`;
   }
   function mountStrokes(item) {
     const area = document.getElementById("strokeArea");
@@ -256,12 +257,12 @@
       });
       const b = document.getElementById("animBtn");
       if (b) b.onclick = () => w.animateCharacter();
-    } catch (e) { /* offline / nicht verfügbar -> still */ }
+    } catch (e) { /* offline / unavailable -> stay quiet */ }
   }
 
   // ---------------------------------------------------------------- Reviews
   function startReviews() {
-    const due = dueReviews();
+    const due = dueReviews().slice(0, REVIEW_BATCH);
     if (!due.length) return renderDashboard();
     const queue = [];
     due.forEach(item => aspectsOf(item).forEach(aspect => queue.push({ item, aspect })));
@@ -272,8 +273,8 @@
     due.forEach(item => session.result[item.id] = { wrong: false, remaining: new Set(aspectsOf(item)) });
     renderReview();
   }
-  // Pflicht-Quiz direkt nach einer Lesson: jedes Item einmal komplett richtig,
-  // dann erst geht es ins SRS (Apprentice I). Keine Rückstufung hier.
+  // Mandatory quiz right after a lesson: each item once fully correct,
+  // only then it enters the SRS (Apprentice I). No demotion here.
   function startQuiz(items) {
     const queue = [];
     items.forEach(item => aspectsOf(item).forEach(aspect => queue.push({ item, aspect })));
@@ -287,10 +288,10 @@
     const q = session.queue[session.pos];
     if (!q) return session.mode === "quiz" ? finishQuiz() : finishReview();
     const { item, aspect } = q;
-    const ask = aspect === "meaning" ? "Bedeutung (meaning)" : `Lesung — ${inputModeLabel()}`;
+    const ask = aspect === "meaning" ? "Meaning" : `Reading — ${inputModeLabel()}`;
     app.innerHTML = `
       <div class="study">
-        <div class="progressline">${session.mode === "quiz" ? "Lesson-Quiz" : "Review"} · ${session.done} / ${session.total} erledigt · noch ${session.queue.length - session.pos} in der Queue</div>
+        <div class="progressline">${session.mode === "quiz" ? "Lesson quiz" : "Review"} · ${session.done} / ${session.total} done · ${session.queue.length - session.pos} left</div>
         <div class="bighead ${item.type}">
           <div class="type">${typeLabel(item.type)} · ${aspect === "meaning" ? "Meaning" : "Reading"}</div>
           <div class="glyph">${displayGlyph(item)}</div>
@@ -314,7 +315,7 @@
     if (res === "almost") {
       input.className = "almost";
       hint.className = "hint almost";
-      hint.textContent = "Fast! Achte auf den Ton. (Enter zum erneut Versuchen)";
+      hint.textContent = "Almost! Mind the tone. (Press Enter to try again)";
       input.onkeydown = e => { if (e.key === "Enter") retryCard(); };
       return;
     }
@@ -323,7 +324,7 @@
     hint.className = correct ? "hint" : "hint bad";
     const r = q.item.reading;
     const correctAns = q.aspect === "meaning" ? q.item.meaning : (r ? `${r.pinyinMark} (${r.zhuyin})` : "");
-    hint.innerHTML = correct ? "✓ richtig — Enter für weiter" : `✗ richtig wäre: <b>${correctAns}</b> — Enter für weiter`;
+    hint.innerHTML = correct ? "✓ correct — Enter to continue" : `✗ answer: <b>${correctAns}</b> — Enter to continue`;
 
     if (!correct) session.result[q.item.id].wrong = true;
 
@@ -333,16 +334,16 @@
         session.done++;
         advanceQueue();
       } else {
-        // falsch -> Karte hinten wieder einreihen, bis richtig
+        // wrong -> requeue the card at the end until it's correct
         session.queue.push(q);
         advanceQueue();
       }
     }};
   }
-  function retryCard() { renderReview(); } // gleiche Karte erneut
+  function retryCard() { renderReview(); } // same card again
   function advanceQueue() {
     session.pos++;
-    // erledigte Items abschließen (SRS aktualisieren), sobald keine Aspekte mehr offen
+    // close items (update SRS) as soon as no aspects are left
     Object.entries(session.result).forEach(([id, r]) => {
       if (!r.closed && r.remaining.size === 0) {
         r.closed = true;
@@ -351,7 +352,7 @@
     });
     renderReview();
   }
-  // Item nach bestandenem Lesson-Quiz neu ins SRS aufnehmen (Apprentice I).
+  // Add item to the SRS after passing the lesson quiz (Apprentice I).
   function commitLesson(id) {
     if (!state.srs[id]) state.srs[id] = { stage: 1, nextReview: Date.now() + intervalFor(1) };
     save();
@@ -374,9 +375,9 @@
     const acc = Math.round((items - wrong) / items * 100);
     app.innerHTML = `
       <div class="card" style="text-align:center">
-        <h2>Review abgeschlossen 🎉</h2>
-        <p class="muted">${items} Items · ${acc}% korrekt beim ersten Versuch</p>
-        <button class="btn-primary" style="padding:12px 22px;border-radius:10px;border:0;color:#fff" id="back">Zum Dashboard</button>
+        <h2>Review complete 🎉</h2>
+        <p class="muted">${items} items · ${acc}% correct on the first try</p>
+        <button class="btn-primary" style="padding:12px 22px;border-radius:10px;border:0;color:#fff" id="back">Back to dashboard</button>
       </div>`;
     document.getElementById("back").onclick = renderDashboard;
     refreshCounts();
@@ -384,15 +385,14 @@
   function finishQuiz() {
     const learned = Object.keys(session.result).length;
     const more = availableLessons().length;
-    const due = dueReviews().length;
     app.innerHTML = `
       <div class="card" style="text-align:center">
-        <h2>Lesson-Quiz geschafft! 🎉</h2>
-        <p class="muted">${learned} Items sind jetzt im SRS (Apprentice I) und kommen
-        bald zur Wiederholung. Bring sie auf <b>Guru</b>, um neue Hanzi & Vokabeln freizuschalten.</p>
+        <h2>Lesson quiz passed! 🎉</h2>
+        <p class="muted">${learned} items are now in your SRS (Apprentice I) and will come up
+        for review soon. Get them to <b>Guru</b> to unlock new hanzi & vocabulary.</p>
         <div class="controls" style="max-width:420px;margin:0 auto">
-          ${more ? `<button class="btn-primary" id="moreLessons">Nächste Lessons (${Math.min(more, LESSON_BATCH)})</button>` : ""}
-          <button class="btn-ghost" id="back">Zum Dashboard</button>
+          ${more ? `<button class="btn-primary" id="moreLessons">Next lessons (${Math.min(more, LESSON_BATCH)})</button>` : ""}
+          <button class="btn-ghost" id="back">Back to dashboard</button>
         </div>
       </div>`;
     document.getElementById("back").onclick = renderDashboard;
@@ -402,12 +402,12 @@
   }
 
   // ---------------------------------------------------------------- Helpers
-  function typeLabel(t) { return { component: "Komponente", hanzi: "Hanzi", vocab: "Vokabel" }[t]; }
-  function inputModeLabel() { return { pinyin_marks: "Pinyin mit Tonzeichen", pinyin_numbers: "Pinyin mit Tonzahl", zhuyin: "Bopomofo" }[state.settings.input]; }
-  function readingPlaceholder() { return { pinyin_marks: "z. B. míng", pinyin_numbers: "z. B. ming2", zhuyin: "z. B. ㄇㄧㄥˊ" }[state.settings.input]; }
+  function typeLabel(t) { return { component: "Radical", hanzi: "Hanzi", vocab: "Vocabulary" }[t]; }
+  function inputModeLabel() { return { pinyin_marks: "Pinyin with tone marks", pinyin_numbers: "Pinyin with tone numbers", zhuyin: "Bopomofo" }[state.settings.input]; }
+  function readingPlaceholder() { return { pinyin_marks: "e.g. míng", pinyin_numbers: "e.g. ming2", zhuyin: "e.g. ㄇㄧㄥˊ" }[state.settings.input]; }
   function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } }
 
-  // ---------------------------------------------------------------- Einstellungen
+  // ---------------------------------------------------------------- Settings
   function openSettings() {
     const s = state.settings;
     const sel = (val, opts) => opts.map(([v, l]) => `<option value="${v}" ${v === val ? "selected" : ""}>${l}</option>`).join("");
@@ -415,19 +415,19 @@
     drawer.innerHTML = `
       <div class="drawer-bg" id="dbg"></div>
       <div class="drawer">
-        <h2>Einstellungen</h2>
-        <div class="field"><label class="lab">Aussprache anzeigen</label>
-          <select id="setDisplay">${sel(s.display, [["pinyin","Pinyin (mǎ)"],["zhuyin","Bopomofo (ㄇㄚˇ)"],["both","Beides"]])}</select></div>
-        <div class="field"><label class="lab">Eingabe bei Reviews</label>
-          <select id="setInput">${sel(s.input, [["pinyin_marks","Pinyin mit Tonzeichen (mǎ)"],["pinyin_numbers","Pinyin mit Tonzahl (ma3)"],["zhuyin","Bopomofo (ㄇㄚˇ)"]])}</select>
-          <small>Tonzeichen-Eingabe ist umständlich zu tippen — Tonzahl ist fürs Üben am praktischsten.</small></div>
-        <div class="field"><label class="row"><input type="checkbox" id="setTone" ${s.toneStrict ? "checked" : ""}> Töne müssen stimmen</label>
-          <small>Aus = Silbe ohne Ton zählt als richtig.</small></div>
-        <div class="field"><label class="row"><input type="checkbox" id="setGate" ${s.gating ? "checked" : ""}> Freischaltung wie WaniKani</label>
-          <small>An = Hanzi/Vokabeln erst lernbar, wenn ihre Bausteine Guru sind.</small></div>
-        <div class="field"><label class="row"><input type="checkbox" id="setDemo" ${s.demo ? "checked" : ""}> Demo-Tempo (kurze Intervalle)</label>
-          <small>An = Reviews kommen in Sekunden statt Stunden zum Ausprobieren.</small></div>
-        <button class="danger" id="reset">Fortschritt zurücksetzen</button>
+        <h2>Settings</h2>
+        <div class="field"><label class="lab">Show pronunciation</label>
+          <select id="setDisplay">${sel(s.display, [["pinyin","Pinyin (mǎ)"],["zhuyin","Bopomofo (ㄇㄚˇ)"],["both","Both"]])}</select></div>
+        <div class="field"><label class="lab">Review input</label>
+          <select id="setInput">${sel(s.input, [["pinyin_marks","Pinyin with tone marks (mǎ)"],["pinyin_numbers","Pinyin with tone numbers (ma3)"],["zhuyin","Bopomofo (ㄇㄚˇ)"]])}</select>
+          <small>Typing tone marks is awkward — tone numbers are the most practical for studying.</small></div>
+        <div class="field"><label class="row"><input type="checkbox" id="setTone" ${s.toneStrict ? "checked" : ""}> Tones must match</label>
+          <small>Off = a syllable without the tone counts as correct.</small></div>
+        <div class="field"><label class="row"><input type="checkbox" id="setGate" ${s.gating ? "checked" : ""}> WaniKani-style unlocking</label>
+          <small>On = hanzi/vocabulary unlock once their building blocks reach Guru.</small></div>
+        <div class="field"><label class="row"><input type="checkbox" id="setDemo" ${s.demo ? "checked" : ""}> Demo speed (short intervals)</label>
+          <small>On = reviews come up in seconds instead of hours, for trying it out.</small></div>
+        <button class="danger" id="reset">Reset progress</button>
       </div>`;
     document.body.appendChild(drawer);
     const close = () => { drawer.remove(); refreshCounts(); if (!session) renderDashboard(); };
@@ -439,7 +439,7 @@
     bind("#setDisplay", "display"); bind("#setInput", "input");
     bind("#setTone", "toneStrict", true); bind("#setGate", "gating", true); bind("#setDemo", "demo", true);
     drawer.querySelector("#reset").onclick = () => {
-      if (confirm("Wirklich allen Lernfortschritt löschen?")) { state = defaults(); save(); close(); renderDashboard(); }
+      if (confirm("Really delete all progress?")) { state = defaults(); save(); close(); renderDashboard(); }
     };
   }
 
@@ -457,7 +457,7 @@
   });
   document.getElementById("gear").onclick = openSettings;
 
-  // Enter-Ablauf läuft über das Eingabefeld (input.onkeydown in renderReview/submitAnswer).
+  // Enter flow runs through the input field (input.onkeydown in renderReview/submitAnswer).
 
   renderDashboard();
 })();

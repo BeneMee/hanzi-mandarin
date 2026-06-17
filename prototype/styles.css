@@ -1,7 +1,8 @@
 :root {
-  --c-component: #0af;   /* Komponenten = blau  */
-  --c-hanzi:     #f0a;   /* Hanzi       = pink  */
-  --c-vocab:     #a0f;   /* Vokabeln    = lila  */
+  /* Eigenes Farbschema "Zinnober & Porzellan" */
+  --c-component: #2E6F9E;   /* Radicals = Porzellanblau */
+  --c-hanzi:     #C8362B;   /* Hanzi    = Zinnoberrot    */
+  --c-vocab:     #6D28D9;   /* Vocab    = Tiefviolett    */
   --bg:    #f4f4f5;
   --panel: #ffffff;
   --ink:   #1b1b1f;
