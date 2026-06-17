@@ -22,6 +22,9 @@ Kein Build nötig — einfach `prototype/index.html` im Browser öffnen.
 
 ## Funktionen (Prototyp)
 - Dashboard mit Komponenten / Hanzi / Vokabeln (WaniKani-Farbschema)
+- Lessons in Batches à 8, danach ein Pflicht-Quiz: jedes Item einmal komplett
+  richtig → erst dann wandert es ins SRS (Apprentice I)
+- Gating: Items müssen *Guru* erreichen, um neue Hanzi/Vokabeln freizuschalten
 - Lessons-Flow mit Mnemonics und Strichreihenfolge ([Hanzi Writer](https://hanziwriter.org/))
 - Reviews mit SRS (9 Stufen) — Bedeutung und Lesung getrennt
 - Einstellungen: Pinyin/Bopomofo, Eingabemodus, Ton-Strenge, Gating, Demo-Tempo

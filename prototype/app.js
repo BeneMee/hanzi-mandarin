@@ -20,6 +20,7 @@
   const HOUR = 3600e3, DAY = 24*HOUR;
   const REAL = { 1:4*HOUR, 2:8*HOUR, 3:23*HOUR, 4:47*HOUR, 5:7*DAY, 6:14*DAY, 7:30*DAY, 8:120*DAY };
   const DEMO = { 1:5e3, 2:10e3, 3:15e3, 4:20e3, 5:30e3, 6:45e3, 7:60e3, 8:90e3 };
+  const LESSON_BATCH = 8;   // wie viele neue Items pro Lesson-Runde
   const intervalFor = stage => (state.settings.demo ? DEMO : REAL)[stage] || 0;
 
   // ---------------------------------------------------------------- State
@@ -30,7 +31,7 @@
       display: "both",          // pinyin | zhuyin | both
       input: "pinyin_marks",    // pinyin_marks | pinyin_numbers | zhuyin
       toneStrict: true,
-      gating: false,            // WaniKani-Freischaltung respektieren?
+      gating: true,             // WaniKani-Freischaltung: erst Guru -> dann nächste Items
       demo: true                // kurze Intervalle zum Ausprobieren
     }
   });
@@ -183,7 +184,7 @@
 
   // ---------------------------------------------------------------- Lessons
   function startLessons() {
-    const items = availableLessons();
+    const items = availableLessons().slice(0, LESSON_BATCH);
     if (!items.length) return renderDashboard();
     session = { mode: "lesson", items, idx: 0 };
     renderLesson();
@@ -202,13 +203,12 @@
         <div class="studybody">${lessonBody(item)}</div>
         <div class="controls">
           <button class="btn-ghost" id="prev" ${idx ? "" : "disabled"}>Zurück</button>
-          <button class="btn-primary" id="next">${idx === items.length - 1 ? "Fertig — lernen" : "Weiter"}</button>
+          <button class="btn-primary" id="next">${idx === items.length - 1 ? "Fertig — jetzt abfragen" : "Weiter"}</button>
         </div>
       </div>`;
     document.getElementById("next").onclick = () => {
       if (idx === items.length - 1) {
-        items.forEach(it => { if (!state.srs[it.id]) state.srs[it.id] = { stage: 1, nextReview: Date.now() + intervalFor(1) }; });
-        save(); renderDashboard();
+        startQuiz(items);     // direkt ins Pflicht-Quiz über genau diese Items
       } else { session.idx++; renderLesson(); }
     };
     const prev = document.getElementById("prev");
@@ -272,15 +272,25 @@
     due.forEach(item => session.result[item.id] = { wrong: false, remaining: new Set(aspectsOf(item)) });
     renderReview();
   }
+  // Pflicht-Quiz direkt nach einer Lesson: jedes Item einmal komplett richtig,
+  // dann erst geht es ins SRS (Apprentice I). Keine Rückstufung hier.
+  function startQuiz(items) {
+    const queue = [];
+    items.forEach(item => aspectsOf(item).forEach(aspect => queue.push({ item, aspect })));
+    shuffle(queue);
+    session = { mode: "quiz", queue, pos: 0, total: queue.length, result: {}, done: 0 };
+    items.forEach(item => session.result[item.id] = { wrong: false, remaining: new Set(aspectsOf(item)) });
+    renderReview();
+  }
   function renderReview() {
-    setNav("reviews");
+    setNav(session.mode === "quiz" ? "lessons" : "reviews");
     const q = session.queue[session.pos];
-    if (!q) return finishReview();
+    if (!q) return session.mode === "quiz" ? finishQuiz() : finishReview();
     const { item, aspect } = q;
     const ask = aspect === "meaning" ? "Bedeutung (meaning)" : `Lesung — ${inputModeLabel()}`;
     app.innerHTML = `
       <div class="study">
-        <div class="progressline">${session.done} / ${session.total} erledigt · noch ${session.queue.length - session.pos} in der Queue</div>
+        <div class="progressline">${session.mode === "quiz" ? "Lesson-Quiz" : "Review"} · ${session.done} / ${session.total} erledigt · noch ${session.queue.length - session.pos} in der Queue</div>
         <div class="bighead ${item.type}">
           <div class="type">${typeLabel(item.type)} · ${aspect === "meaning" ? "Meaning" : "Reading"}</div>
           <div class="glyph">${displayGlyph(item)}</div>
@@ -334,9 +344,17 @@
     session.pos++;
     // erledigte Items abschließen (SRS aktualisieren), sobald keine Aspekte mehr offen
     Object.entries(session.result).forEach(([id, r]) => {
-      if (!r.closed && r.remaining.size === 0) { r.closed = true; applySrs(id, r.wrong); }
+      if (!r.closed && r.remaining.size === 0) {
+        r.closed = true;
+        if (session.mode === "quiz") commitLesson(id); else applySrs(id, r.wrong);
+      }
     });
     renderReview();
+  }
+  // Item nach bestandenem Lesson-Quiz neu ins SRS aufnehmen (Apprentice I).
+  function commitLesson(id) {
+    if (!state.srs[id]) state.srs[id] = { stage: 1, nextReview: Date.now() + intervalFor(1) };
+    save();
   }
   function applySrs(id, wrong) {
     const s = state.srs[id];
@@ -361,6 +379,25 @@
         <button class="btn-primary" style="padding:12px 22px;border-radius:10px;border:0;color:#fff" id="back">Zum Dashboard</button>
       </div>`;
     document.getElementById("back").onclick = renderDashboard;
+    refreshCounts();
+  }
+  function finishQuiz() {
+    const learned = Object.keys(session.result).length;
+    const more = availableLessons().length;
+    const due = dueReviews().length;
+    app.innerHTML = `
+      <div class="card" style="text-align:center">
+        <h2>Lesson-Quiz geschafft! 🎉</h2>
+        <p class="muted">${learned} Items sind jetzt im SRS (Apprentice I) und kommen
+        bald zur Wiederholung. Bring sie auf <b>Guru</b>, um neue Hanzi & Vokabeln freizuschalten.</p>
+        <div class="controls" style="max-width:420px;margin:0 auto">
+          ${more ? `<button class="btn-primary" id="moreLessons">Nächste Lessons (${Math.min(more, LESSON_BATCH)})</button>` : ""}
+          <button class="btn-ghost" id="back">Zum Dashboard</button>
+        </div>
+      </div>`;
+    document.getElementById("back").onclick = renderDashboard;
+    const m = document.getElementById("moreLessons");
+    if (m) m.onclick = startLessons;
     refreshCounts();
   }
 
