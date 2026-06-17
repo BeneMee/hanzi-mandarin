@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>漢字 Mandarin — Prototyp</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand">漢字 Mandarin <small>Prototyp · Level 1</small></div>
+    <nav>
+      <button data-go="dashboard" class="active">Dashboard</button>
+      <button data-go="lessons">Lessons</button>
+      <button data-go="reviews">Reviews</button>
+    </nav>
+    <div class="spacer"></div>
+    <span class="pill lessons">Lessons <b id="countLessons">0</b></span>
+    <span class="pill reviews">Reviews <b id="countReviews">0</b></span>
+    <button class="gear" id="gear" title="Einstellungen">⚙</button>
+  </header>
+
+  <main id="app"></main>
+
+  <!-- Strichreihenfolge (optional, lädt aus CDN wenn online) -->
+  <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5/dist/hanzi-writer.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
