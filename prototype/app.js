@@ -321,6 +321,8 @@
     }
     const correct = res === "ok";
     input.className = correct ? "ok" : "bad";
+    if (correct) { spawnParticles(input); playCorrectSound(); }
+    else { triggerShake(input); }
     hint.className = correct ? "hint" : "hint bad";
     const r = q.item.reading;
     const correctAns = q.aspect === "meaning" ? q.item.meaning : (r ? `${r.pinyinMark} (${r.zhuyin})` : "");
@@ -399,6 +401,48 @@
     const m = document.getElementById("moreLessons");
     if (m) m.onclick = startLessons;
     refreshCounts();
+  }
+
+  // ---------------------------------------------------------------- Feedback effects
+  function spawnParticles(el) {
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    for (let i = 0; i < 14; i++) {
+      const p = document.createElement("span");
+      p.className = "particle";
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 50 + Math.random() * 80;
+      p.style.left = cx + "px";
+      p.style.top = cy + "px";
+      p.style.setProperty("--dx", Math.cos(angle) * dist + "px");
+      p.style.setProperty("--dy", (Math.sin(angle) * dist - 50) + "px");
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), 800);
+    }
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const t = ctx.currentTime;
+      [[523, 0], [659, 0.12], [784, 0.24]].forEach(([freq, delay]) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.connect(g); g.connect(ctx.destination);
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.22, t + delay);
+        g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.35);
+        osc.start(t + delay); osc.stop(t + delay + 0.4);
+      });
+    } catch(e) {}
+  }
+
+  function triggerShake(el) {
+    el.classList.remove("shake");
+    void el.offsetWidth; // reflow to restart animation
+    el.classList.add("shake");
+    setTimeout(() => el.classList.remove("shake"), 500);
   }
 
   // ---------------------------------------------------------------- Helpers

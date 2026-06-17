@@ -157,6 +157,27 @@ h2 { margin: 0 0 14px; font-size: 18px; }
 #strokeArea { display: flex; justify-content: center; margin: 8px 0 16px; }
 .linklike { background: none; border: 0; color: var(--c-hanzi); text-decoration: underline; padding: 0; font-size: 14px; }
 
+/* ---------- Feedback animations ---------- */
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  20%     { transform: translateX(-10px); }
+  40%     { transform: translateX(10px); }
+  60%     { transform: translateX(-6px); }
+  80%     { transform: translateX(6px); }
+}
+.shake { animation: shake 0.45s ease-in-out; }
+
+@keyframes particle-rise {
+  to { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
+}
+.particle {
+  position: fixed; z-index: 999;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--ok);
+  pointer-events: none;
+  animation: particle-rise 0.75s ease-out forwards;
+}
+
 /* ---------- Mobile (≤640px) ---------- */
 @media (max-width: 640px) {
   /* Header: Marke + Pills + Zahnrad in einer kompakten, umbrechbaren Zeile.
