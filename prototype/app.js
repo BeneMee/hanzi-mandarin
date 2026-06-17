@@ -1,39 +1,39 @@
-/* Prototype logic: SRS, lessons, reviews, settings.
+/* Prototype logic: SM-2 SRS, lessons, reviews, multi-level, settings.
  * Vanilla JS, persistence via localStorage. */
 (function () {
   "use strict";
 
   // ---------------------------------------------------------------- Data
-  const D = window.DATA;
-  const ALL = [
-    ...D.components.map(x => ({ ...x, type: "component" })),
-    ...D.hanzi.map(x => ({ ...x, type: "hanzi" })),
-    ...D.vocab.map(x => ({ ...x, type: "vocab" }))
-  ];
+  const LEVELS = [window.DATA, window.DATA2, window.DATA3].filter(Boolean);
+  const ALL = [];
+  LEVELS.forEach((lvl, li) => {
+    ALL.push(...lvl.components.map(x => ({ ...x, type: "component", li })));
+    ALL.push(...lvl.hanzi.map(x => ({ ...x, type: "hanzi", li })));
+    ALL.push(...lvl.vocab.map(x => ({ ...x, type: "vocab", li })));
+  });
   const byId = Object.fromEntries(ALL.map(i => [i.id, i]));
   const displayGlyph = i => i.glyph || i.character || i.word;
 
-  // ---------------------------------------------------------------- SRS model
-  // Stages 1..9. Interval = time until the next review WHILE at that stage.
+  // ---------------------------------------------------------------- SRS model (SM-2)
   const STAGE_NAME = { 1:"Appr. I",2:"Appr. II",3:"Appr. III",4:"Appr. IV",5:"Guru I",6:"Guru II",7:"Master",8:"Enlightened",9:"Burned" };
   const GURU = 5;
-  const HOUR = 3600e3, DAY = 24*HOUR;
-  const REAL = { 1:4*HOUR, 2:8*HOUR, 3:23*HOUR, 4:47*HOUR, 5:7*DAY, 6:14*DAY, 7:30*DAY, 8:120*DAY };
-  const DEMO = { 1:5e3, 2:10e3, 3:15e3, 4:20e3, 5:30e3, 6:45e3, 7:60e3, 8:90e3 };
-  const LESSON_BATCH = 5;   // new items per lesson round
-  const REVIEW_BATCH = 5;   // items per review session
-  const intervalFor = stage => (state.settings.demo ? DEMO : REAL)[stage] || 0;
+  const DAY = 24 * 3600e3;
+  const LESSON_BATCH = 5;
+  const REVIEW_BATCH = 5;
+
+  // Demo mode: 10 s per "day" so intervals stay short for testing.
+  function msFor(days) { return state.settings.demo ? days * 10000 : days * DAY; }
 
   // ---------------------------------------------------------------- State
   const SKEY = "mandarin_proto_v1";
   const defaults = () => ({
-    srs: {},          // itemId -> { stage, nextReview }
+    srs: {},
     settings: {
-      display: "both",          // pinyin | zhuyin | both
-      input: "pinyin_marks",    // pinyin_marks | pinyin_numbers | zhuyin
+      display: "both",
+      input: "pinyin_numbers",   // tone numbers (ma3) work on any keyboard
       toneStrict: true,
-      gating: true,             // WaniKani-style unlocking: Guru first -> then next items
-      demo: true                // short intervals for trying it out
+      gating: true,
+      demo: true
     }
   });
   let state = load();
@@ -46,13 +46,23 @@
   }
   function save() { localStorage.setItem(SKEY, JSON.stringify(state)); }
 
-  // ---------------------------------------------------------------- Gating
+  // ---------------------------------------------------------------- Level gating
+  // Level N+1 unlocks when ≥80 % of Level N hanzi reach Guru.
+  function isLevelUnlocked(li) {
+    if (li === 0) return true;
+    const prev = LEVELS[li - 1];
+    const needed = Math.ceil(prev.hanzi.length * 0.8);
+    return prev.hanzi.filter(h => (state.srs[h.id]?.stage || 0) >= GURU).length >= needed;
+  }
+
+  // ---------------------------------------------------------------- Item gating
   function prereqIds(item) {
     if (item.type === "hanzi") return item.componentIds || [];
     if (item.type === "vocab") return item.hanziIds || [];
     return [];
   }
   function isUnlocked(item) {
+    if (!isLevelUnlocked(item.li)) return false;
     if (!state.settings.gating) return true;
     return prereqIds(item).every(id => (state.srs[id]?.stage || 0) >= GURU);
   }
@@ -80,13 +90,13 @@
     const i = noSpace(norm(input));
     if (!i) return "bad";
     const forms = [reading.pinyinNum, reading.pinyinMark, reading.zhuyin].map(f => noSpace(norm(f)));
-    if (forms.includes(i)) return "ok";                       // exact (tone correct)
-    if (!state.settings.toneStrict) {                         // ignore tone -> "almost" counts as ok
+    if (forms.includes(i)) return "ok";
+    if (!state.settings.toneStrict) {
       const iBase = stripPinyinTones(i).replace(ZHTONE, "");
       const ok = [reading.pinyinNum, reading.pinyinMark].some(f => stripPinyinTones(noSpace(norm(f))) === iBase)
               || noSpace(norm(reading.zhuyin)).replace(ZHTONE, "") === iBase;
       if (ok) return "ok";
-    } else {                                                  // strict -> syllable ok, tone wrong = "almost"
+    } else {
       const iBase = stripPinyinTones(i).replace(ZHTONE, "");
       const almost = [reading.pinyinNum, reading.pinyinMark].some(f => stripPinyinTones(noSpace(norm(f))) === iBase)
                   || noSpace(norm(reading.zhuyin)).replace(ZHTONE, "") === iBase;
@@ -125,7 +135,7 @@
   const app = document.getElementById("app");
   const elLessons = document.getElementById("countLessons");
   const elReviews = document.getElementById("countReviews");
-  let session = null; // active lesson/review session
+  let session = null;
 
   function refreshCounts() {
     elLessons.textContent = availableLessons().length;
@@ -136,34 +146,51 @@
     document.querySelectorAll("header nav button").forEach(b => b.classList.toggle("active", b.dataset.go === name));
   }
 
+  // ---------------------------------------------------------------- Dashboard
   function renderDashboard() {
     session = null; setNav("dashboard"); refreshCounts();
     const lessons = availableLessons().length, reviews = dueReviews().length;
-    const gurued = D.hanzi.filter(h => (state.srs[h.id]?.stage || 0) >= GURU).length;
-    const pct = Math.round(gurued / D.hanzi.length * 100);
+
+    const levelCards = LEVELS.map((lvl, li) => {
+      const unlocked = isLevelUnlocked(li);
+      const guruCount = lvl.hanzi.filter(h => (state.srs[h.id]?.stage || 0) >= GURU).length;
+      const pct = Math.round(guruCount / lvl.hanzi.length * 100);
+
+      if (!unlocked) {
+        const prev = LEVELS[li - 1];
+        const needed = Math.ceil(prev.hanzi.length * 0.8);
+        const prevGuru = prev.hanzi.filter(h => (state.srs[h.id]?.stage || 0) >= GURU).length;
+        return `<div class="card">
+          <h2 style="color:var(--muted)">🔒 Level ${lvl.level}</h2>
+          <p class="muted">Get ${needed} of ${prev.hanzi.length} Level ${prev.level} hanzi to Guru to unlock.
+          &nbsp;(${prevGuru} / ${needed} so far)</p>
+        </div>`;
+      }
+
+      return `<div class="card">
+        <h2>Level ${lvl.level}
+          <span style="font-size:13px;font-weight:400;color:var(--muted);margin-left:8px">${guruCount}/${lvl.hanzi.length} hanzi at Guru+ (${pct}%)</span>
+        </h2>
+        <div class="bar" style="margin-bottom:16px"><i style="width:${pct}%"></i></div>
+        <div class="legend">
+          <span><i class="dot component"></i> Radical</span>
+          <span><i class="dot hanzi"></i> Hanzi</span>
+          <span><i class="dot vocab"></i> Vocabulary</span>
+        </div>
+        ${grid(lvl.components.map(x => ({...x, type:"component", li})), "Radicals")}
+        ${grid(lvl.hanzi.map(x => ({...x, type:"hanzi", li})), "Hanzi")}
+        ${grid(lvl.vocab.map(x => ({...x, type:"vocab", li})), "Vocabulary")}
+      </div>`;
+    }).join("");
 
     app.innerHTML = `
-      <div class="card">
-        <h2>Level ${D.level}</h2>
-        <div class="muted" style="margin-bottom:8px">${gurued}/${D.hanzi.length} hanzi at Guru+ (${pct}%)</div>
-        <div class="bar"><i style="width:${pct}%"></i></div>
-      </div>
       <div class="card">
         <button class="bigbtn lessons" data-go="lessons" ${lessons ? "" : "disabled"}>
           Start lessons — ${lessons} available</button>
         <button class="bigbtn reviews" data-go="reviews" ${reviews ? "" : "disabled"}>
           Start reviews — ${reviews} due</button>
       </div>
-      <div class="card">
-        <div class="legend">
-          <span><i class="dot component"></i> Radical</span>
-          <span><i class="dot hanzi"></i> Hanzi</span>
-          <span><i class="dot vocab"></i> Vocabulary</span>
-        </div>
-        ${grid(D.components.map(x=>({...x,type:"component"})), "Radicals")}
-        ${grid(D.hanzi.map(x=>({...x,type:"hanzi"})), "Hanzi")}
-        ${grid(D.vocab.map(x=>({...x,type:"vocab"})), "Vocabulary")}
-      </div>`;
+      ${levelCards}`;
   }
 
   function grid(items, title) {
@@ -208,9 +235,8 @@
         </div>
       </div>`;
     document.getElementById("next").onclick = () => {
-      if (idx === items.length - 1) {
-        startQuiz(items);     // straight into the mandatory quiz over exactly these items
-      } else { session.idx++; renderLesson(); }
+      if (idx === items.length - 1) startQuiz(items);
+      else { session.idx++; renderLesson(); }
     };
     const prev = document.getElementById("prev");
     if (prev && idx) prev.onclick = () => { session.idx--; renderLesson(); };
@@ -236,8 +262,8 @@
       <h3>Notes</h3><p>${item.note}</p>`;
   }
   function compChips(ids, hanzi) {
-    return ids.map(id => {
-      const c = byId[id];
+    return (ids || []).map(id => {
+      const c = byId[id]; if (!c) return "";
       return `<span class="comp-chip ${hanzi ? "hanzi" : ""}">${displayGlyph(c)} <b>${c.name || c.meaning}</b></span>`;
     }).join("");
   }
@@ -257,30 +283,26 @@
       });
       const b = document.getElementById("animBtn");
       if (b) b.onclick = () => w.animateCharacter();
-    } catch (e) { /* offline / unavailable -> stay quiet */ }
+    } catch (e) {}
   }
 
-  // ---------------------------------------------------------------- Reviews
+  // ---------------------------------------------------------------- Reviews & Quiz
   function startReviews() {
     const due = dueReviews().slice(0, REVIEW_BATCH);
     if (!due.length) return renderDashboard();
     const queue = [];
     due.forEach(item => aspectsOf(item).forEach(aspect => queue.push({ item, aspect })));
     shuffle(queue);
-    session = { mode: "review", queue, pos: 0, total: queue.length,
-      result: {}, // itemId -> { wrong: bool, remaining: Set }
-      done: 0 };
-    due.forEach(item => session.result[item.id] = { wrong: false, remaining: new Set(aspectsOf(item)) });
+    session = { mode: "review", queue, pos: 0, total: queue.length, result: {}, done: 0 };
+    due.forEach(item => session.result[item.id] = { wrong: false, almost: false, remaining: new Set(aspectsOf(item)) });
     renderReview();
   }
-  // Mandatory quiz right after a lesson: each item once fully correct,
-  // only then it enters the SRS (Apprentice I). No demotion here.
   function startQuiz(items) {
     const queue = [];
     items.forEach(item => aspectsOf(item).forEach(aspect => queue.push({ item, aspect })));
     shuffle(queue);
     session = { mode: "quiz", queue, pos: 0, total: queue.length, result: {}, done: 0 };
-    items.forEach(item => session.result[item.id] = { wrong: false, remaining: new Set(aspectsOf(item)) });
+    items.forEach(item => session.result[item.id] = { wrong: false, almost: false, remaining: new Set(aspectsOf(item)) });
     renderReview();
   }
   function renderReview() {
@@ -316,6 +338,7 @@
       input.className = "almost";
       hint.className = "hint almost";
       hint.textContent = "Almost! Mind the tone. (Press Enter to try again)";
+      session.result[q.item.id].almost = true;
       input.onkeydown = e => { if (e.key === "Enter") retryCard(); };
       return;
     }
@@ -325,8 +348,10 @@
     else { triggerShake(input); }
     hint.className = correct ? "hint" : "hint bad";
     const r = q.item.reading;
-    const correctAns = q.aspect === "meaning" ? q.item.meaning : (r ? `${r.pinyinMark} (${r.zhuyin})` : "");
-    hint.innerHTML = correct ? "✓ correct — Enter to continue" : `✗ answer: <b>${correctAns}</b> — Enter to continue`;
+    const correctAns = q.aspect === "meaning"
+      ? q.item.meaning
+      : (r ? `${r.pinyinMark} · <b>${r.pinyinNum}</b> (${r.zhuyin})` : "");
+    hint.innerHTML = correct ? "✓ correct — Enter to continue" : `✗ answer: ${correctAns} — Enter to continue`;
 
     if (!correct) session.result[q.item.id].wrong = true;
 
@@ -336,41 +361,62 @@
         session.done++;
         advanceQueue();
       } else {
-        // wrong -> requeue the card at the end until it's correct
         session.queue.push(q);
         advanceQueue();
       }
     }};
   }
-  function retryCard() { renderReview(); } // same card again
+  function retryCard() { renderReview(); }
   function advanceQueue() {
     session.pos++;
-    // close items (update SRS) as soon as no aspects are left
     Object.entries(session.result).forEach(([id, r]) => {
       if (!r.closed && r.remaining.size === 0) {
         r.closed = true;
-        if (session.mode === "quiz") commitLesson(id); else applySrs(id, r.wrong);
+        if (session.mode === "quiz") commitLesson(id);
+        else applySrs(id, r.wrong, r.almost);
       }
     });
     renderReview();
   }
-  // Add item to the SRS after passing the lesson quiz (Apprentice I).
+
+  // ---------------------------------------------------------------- SM-2 SRS
   function commitLesson(id) {
-    if (!state.srs[id]) state.srs[id] = { stage: 1, nextReview: Date.now() + intervalFor(1) };
+    if (!state.srs[id]) {
+      state.srs[id] = { stage: 1, nextReview: Date.now() + msFor(1), ef: 2.5, reps: 0, interval: 1 };
+    }
     save();
   }
-  function applySrs(id, wrong) {
+  function applySrs(id, wrong, almost) {
     const s = state.srs[id];
     if (!s) return;
+    // Migrate items saved before SM-2 was introduced
+    if (!s.ef) s.ef = 2.5;
+    if (s.reps == null) s.reps = Math.max(0, s.stage - 1);
+    if (!s.interval) s.interval = [0,1,1,2,4,7,14,30,120][s.stage] || 1;
+
     if (wrong) {
-      const factor = s.stage >= GURU ? 2 : 1;
-      s.stage = Math.max(1, s.stage - factor);
+      // SM-2: reset repetitions, interval back to 1, penalise ease factor
+      s.ef = Math.max(1.3, s.ef - 0.2);
+      s.reps = 0;
+      s.interval = 1;
+      s.stage = Math.max(1, s.stage - (s.stage >= GURU ? 2 : 1));
     } else {
+      // SM-2 interval progression
+      if (s.reps === 0) s.interval = 1;
+      else if (s.reps === 1) s.interval = 6;
+      else s.interval = Math.round(s.interval * s.ef);
+
+      // EF update: perfect answer → +0.1, tone mistake (almost) → −0.1
+      s.ef = Math.max(1.3, Math.min(3.0, s.ef + (almost ? -0.1 : 0.1)));
+      s.reps++;
       s.stage = Math.min(9, s.stage + 1);
     }
-    s.nextReview = s.stage >= 9 ? Infinity : Date.now() + intervalFor(s.stage);
+
+    s.nextReview = s.stage >= 9 ? Infinity : Date.now() + msFor(s.interval);
     save();
   }
+
+  // ---------------------------------------------------------------- Finish screens
   function finishReview() {
     const items = Object.keys(session.result).length;
     const wrong = Object.values(session.result).filter(r => r.wrong).length;
@@ -421,7 +467,6 @@
       setTimeout(() => p.remove(), 800);
     }
   }
-
   function playCorrectSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -437,18 +482,21 @@
       });
     } catch(e) {}
   }
-
   function triggerShake(el) {
     el.classList.remove("shake");
-    void el.offsetWidth; // reflow to restart animation
+    void el.offsetWidth;
     el.classList.add("shake");
     setTimeout(() => el.classList.remove("shake"), 500);
   }
 
   // ---------------------------------------------------------------- Helpers
   function typeLabel(t) { return { component: "Radical", hanzi: "Hanzi", vocab: "Vocabulary" }[t]; }
-  function inputModeLabel() { return { pinyin_marks: "Pinyin with tone marks", pinyin_numbers: "Pinyin with tone numbers", zhuyin: "Bopomofo" }[state.settings.input]; }
-  function readingPlaceholder() { return { pinyin_marks: "e.g. míng", pinyin_numbers: "e.g. ming2", zhuyin: "e.g. ㄇㄧㄥˊ" }[state.settings.input]; }
+  function inputModeLabel() {
+    return { pinyin_marks: "Pinyin (tone marks)", pinyin_numbers: "Pinyin (tone numbers)", zhuyin: "Bopomofo" }[state.settings.input];
+  }
+  function readingPlaceholder() {
+    return { pinyin_marks: "e.g. míng", pinyin_numbers: "e.g. ming2", zhuyin: "e.g. ㄇㄧㄥˊ" }[state.settings.input];
+  }
   function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } }
 
   // ---------------------------------------------------------------- Settings
@@ -463,14 +511,18 @@
         <div class="field"><label class="lab">Show pronunciation</label>
           <select id="setDisplay">${sel(s.display, [["pinyin","Pinyin (mǎ)"],["zhuyin","Bopomofo (ㄇㄚˇ)"],["both","Both"]])}</select></div>
         <div class="field"><label class="lab">Review input</label>
-          <select id="setInput">${sel(s.input, [["pinyin_marks","Pinyin with tone marks (mǎ)"],["pinyin_numbers","Pinyin with tone numbers (ma3)"],["zhuyin","Bopomofo (ㄇㄚˇ)"]])}</select>
-          <small>Typing tone marks is awkward — tone numbers are the most practical for studying.</small></div>
+          <select id="setInput">${sel(s.input, [
+            ["pinyin_numbers","Pinyin tone numbers — ma3, ming2 ✓ recommended"],
+            ["pinyin_marks","Pinyin tone marks — mǎ, míng"],
+            ["zhuyin","Bopomofo — ㄇㄚˇ, ㄇㄧㄥˊ"]
+          ])}</select>
+          <small>Tone numbers work on <b>any keyboard including mobile</b>. Type ma3 for mǎ, ming2 for míng.</small></div>
         <div class="field"><label class="row"><input type="checkbox" id="setTone" ${s.toneStrict ? "checked" : ""}> Tones must match</label>
-          <small>Off = a syllable without the tone counts as correct.</small></div>
+          <small>Off = syllable without tone is accepted as correct.</small></div>
         <div class="field"><label class="row"><input type="checkbox" id="setGate" ${s.gating ? "checked" : ""}> WaniKani-style unlocking</label>
-          <small>On = hanzi/vocabulary unlock once their building blocks reach Guru.</small></div>
-        <div class="field"><label class="row"><input type="checkbox" id="setDemo" ${s.demo ? "checked" : ""}> Demo speed (short intervals)</label>
-          <small>On = reviews come up in seconds instead of hours, for trying it out.</small></div>
+          <small>On = hanzi/vocab unlock once building blocks reach Guru.</small></div>
+        <div class="field"><label class="row"><input type="checkbox" id="setDemo" ${s.demo ? "checked" : ""}> Demo speed</label>
+          <small>On = reviews come up in seconds instead of days.</small></div>
         <button class="danger" id="reset">Reset progress</button>
       </div>`;
     document.body.appendChild(drawer);
@@ -500,8 +552,6 @@
     if (go === "reviews") startReviews();
   });
   document.getElementById("gear").onclick = openSettings;
-
-  // Enter flow runs through the input field (input.onkeydown in renderReview/submitAnswer).
 
   renderDashboard();
 })();
